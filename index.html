@@ -136,19 +136,37 @@
             </template>
         </div>
 
-        <div x-show="view === 'settings'" x-cloak>
+                <div x-show="view === 'settings'" x-cloak>
             <h2 class="text-2xl font-bold mb-4">System Configuration</h2>
-            <div class="ios-card">
+
+            <div class="ios-card bg-red-900/40 border border-red-500 mb-6" x-show="!config.jwt">
+                <h3 class="font-bold mb-2 text-red-400">🚨 CRITICAL: Login Required</h3>
+                <label class="text-xs text-gray-500">Email</label>
+                <input x-model="auth.email" type="email" class="w-full bg-black border border-gray-700 rounded p-2 mb-2">
+                <label class="text-xs text-gray-500">Password</label>
+                <input x-model="auth.password" type="password" class="w-full bg-black border border-gray-700 rounded p-2 mb-4">
+                
+                <div class="flex gap-2">
+                    <button @click="handleAuth('signup')" class="flex-1 bg-yellow-600 py-2 rounded font-bold text-sm">Sign Up (First Time)</button>
+                    <button @click="handleAuth('login')" class="flex-1 bg-green-600 py-2 rounded font-bold text-sm">Log In</button>
+                </div>
+                <p class="text-xs text-center mt-3 text-red-300" x-text="auth.message"></p>
+            </div>
+            <div class="ios-card border-l-4 border-blue-500">
                 <h3 class="font-bold mb-2">API Keys (CRITICAL)</h3>
+                <p class="text-xs text-gray-500 mb-2" x-show="config.jwt">Logged in as: <span class="text-green-400">User ID: <span x-text="user.id"></span></span></p>
+                
                 <label class="text-xs text-gray-500">Supabase URL</label>
                 <input x-model="config.sbUrl" class="w-full bg-black border border-gray-700 rounded p-2 mb-2">
                 <label class="text-xs text-gray-500">Supabase Anon Key</label>
                 <input x-model="config.sbKey" type="password" class="w-full bg-black border border-gray-700 rounded p-2 mb-4">
                 <label class="text-xs text-gray-500">Backend URL (Render)</label>
                 <input x-model="config.backendUrl" class="w-full bg-black border border-gray-700 rounded p-2 mb-4">
+                
                 <button @click="saveConfig()" class="w-full bg-blue-600 py-2 rounded font-bold">Save & Reboot</button>
             </div>
         </div>
+
     </main>
 
     <nav class="glass fixed bottom-0 w-full pb-6 pt-2 flex justify-around text-[10px] z-50">
@@ -173,6 +191,13 @@
     // --- CORE APPLICATION LOGIC (Alpine.js) ---
     function app() {
         return {
+                        // AUTH STATE
+            auth: {
+                email: '',
+                password: '',
+                message: 'Enter credentials and Sign Up first.',
+            },
+
             // STATE MANAGEMENT
             view: 'dashboard',
             isPaused: false,
@@ -457,6 +482,52 @@
                 localStorage.setItem('API_URL', this.config.backendUrl);
                 alert("System Rebooting. Please reload the PWA from your Home Screen.");
             },
+                        // --- AUTHENTICATION LOGIC ---
+            async handleAuth(mode) {
+                this.auth.message = 'Processing...';
+                if (!this.config.sbUrl || !this.config.sbKey) {
+                    this.auth.message = 'Error: Enter Supabase Keys first!';
+                    return;
+                }
+                
+                // Ensure Supabase client is initialized before authentication
+                this.supabase = window.supabase.createClient(this.config.sbUrl, this.config.sbKey);
+
+                let response;
+                try {
+                    if (mode === 'signup') {
+                        response = await this.supabase.auth.signUp({
+                            email: this.auth.email,
+                            password: this.auth.password,
+                        });
+                    } else if (mode === 'login') {
+                        response = await this.supabase.auth.signInWithPassword({
+                            email: this.auth.email,
+                            password: this.auth.password,
+                        });
+                    }
+                    
+                    if (response.error) {
+                        throw new Error(response.error.message);
+                    }
+
+                    if (response.data.session) {
+                        const jwt = response.data.session.access_token;
+                        localStorage.setItem('AUTH_JWT', jwt);
+                        this.config.jwt = jwt; // Update the config state
+                        this.user.id = response.data.user.id; // Set user ID
+                        this.auth.message = `Success! Logged in. Tap Save & Reboot.`;
+                        alert("Authentication successful! Tap 'Save & Reboot' now.");
+                    } else if (mode === 'signup') {
+                         this.auth.message = 'Sign Up successful! Check your email to confirm, then Log In.';
+                    }
+
+                } catch (e) {
+                    this.auth.message = `Auth Failed: ${e.message}`;
+                    console.error('Auth Error:', e);
+                }
+            },
+
 
             // --- OFFLINE HELPER ---
             saveLocalChange(table, data) {
